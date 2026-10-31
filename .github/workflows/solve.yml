@@ -1,0 +1,20 @@
+name: solve
+on:
+  push:
+    branches: [ "arena/725ba00e-cft22" ]
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: hello
+        run: |
+          echo "runner up"
+          python3 -V
+          curl -sS -m 20 https://mvwhs9b5ieeclup6.instances.ctfcup.online/ | head -30
+          echo "--- rpc ---"
+          curl -sS -m 20 -X POST -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
+            https://mvwhs9b5ieeclup6.instances.ctfcup.online | head -5
