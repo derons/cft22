@@ -1,8 +1,13 @@
 """VRF prediction: we recovered the oracle secret s, so every (gameId, turn) roll is known."""
+import json
+import os
+
 from Crypto.Hash import keccak
 
-P = 69791413546914595802347733061036845443281698557187053530193101591522424466219
-S = 50311264449498499212645012083343631218300571912059484696268200645472145571621
+_CFG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ci", "config.json")
+_C = json.load(open(_CFG)) if os.path.exists(_CFG) else {}
+P = _C.get("P", 69791413546914595802347733061036845443281698557187053530193101591522424466219)
+S = _C.get("s", 50311264449498499212645012083343631218300571912059484696268200645472145571621)
 
 
 def _keccak(b: bytes) -> bytes:

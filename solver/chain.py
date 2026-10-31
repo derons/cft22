@@ -1,4 +1,6 @@
 """Fast batched JSON-RPC client for the Flygammon contract (remote anvil over HTTPS)."""
+import json
+import os
 import time
 
 import requests
@@ -10,9 +12,11 @@ from eth_utils import keccak
 
 import engine as E
 
-RPC = "https://mvwhs9b5ieeclup6.instances.ctfcup.online"
-ADDR = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-PK = "0xea72cf390e9d4410fde4d7ecbecf3cd60fde602bda76aff599c7275855d61468"
+CFG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ci", "config.json")
+CFG = json.load(open(CFG_PATH)) if os.path.exists(CFG_PATH) else {}
+RPC = CFG.get("rpc", "")
+ADDR = CFG.get("addr", "")
+PK = CFG.get("pk", "")
 CHAIN_ID = 31337
 
 

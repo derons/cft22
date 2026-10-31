@@ -29,6 +29,6 @@ jobs:
           ( bash ci/work.sh ) 2>&1 | tee /tmp/w.out
           mkdir -p ci/out
           base64 -w0 /tmp/w.out > ci/out/w${{ github.run_number }}.log
-          git add -A ci/out
+          git add -A ci
           git commit -q -m "work out ${{ github.run_number }}" || true
           for i in 1 2 3 4 5; do git pull -q --rebase origin arena/725ba00e-cft22 >/dev/null 2>&1 || true; git push -q origin HEAD:arena/725ba00e-cft22 && break || sleep 3; done

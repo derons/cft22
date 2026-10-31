@@ -1,4 +1,5 @@
 """Live driver. play: resume/commit and play games; watch: dump state."""
+import json
 import os
 import sys
 import time
@@ -65,8 +66,24 @@ def play_live(ch, pl, gid, out):
     out.append("after game: gameId=%d streak=%d tokens=%d" % (st["gameId"], st["streak"], st["tokens"]))
 
 
+def ensure_config():
+    """(Re)run setup when ci/config.json is missing or points at another instance."""
+    cfgp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ci", "config.json")
+    want = os.environ.get("INSTANCE", "").rstrip("/")
+    if os.path.exists(cfgp):
+        cfg = json.load(open(cfgp))
+        if not want or cfg.get("rpc", "") == want:
+            return cfg
+    if not want:
+        raise SystemExit("no config and no INSTANCE url")
+    import setup
+    setup.main_url(want)
+    return json.load(open(cfgp))
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "watch"
+    ensure_config()
     ch = chain.Chain()
     pl = policy.Player()
     t0 = time.time()
