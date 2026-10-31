@@ -1,20 +1,28 @@
 name: solve
 on:
-  push:
-    branches: [ "arena/725ba00e-cft22" ]
   workflow_dispatch:
+concurrency:
+  group: relay
+  cancel-in-progress: false
 jobs:
-  probe:
+  relay:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 350
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: hello
+        with:
+          ref: arena/725ba00e-cft22
+          fetch-depth: 0
+      - name: deps
         run: |
-          echo "runner up"
           python3 -V
-          curl -sS -m 20 https://mvwhs9b5ieeclup6.instances.ctfcup.online/ | head -30
-          echo "--- rpc ---"
-          curl -sS -m 20 -X POST -H 'Content-Type: application/json' \
-            -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
-            https://mvwhs9b5ieeclup6.instances.ctfcup.online | head -5
+          pip install --quiet --disable-pip-version-check web3 eth-account pycryptodome gmpy2 sympy numpy requests
+          python3 -c "import web3, eth_account, Crypto, gmpy2, sympy, numpy; print('deps ok')"
+      - name: config
+        run: |
+          git config user.name "relay-bot"
+          git config user.email "relay-bot@users.noreply.github.com"
+      - name: relay
+        run: bash ci/relay.sh
