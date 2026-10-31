@@ -1,92 +1,147 @@
-"""Minimal web3 client for the Flygammon contract (runs where the RPC is reachable)."""
+"""Fast batched JSON-RPC client for the Flygammon contract (remote anvil over HTTPS)."""
+import json
 import time
+
+import requests
 from eth_account import Account
+from eth_abi import encode as abi_encode
 from eth_utils import keccak
-from web3 import Web3
 
 import engine as E
 
 RPC = "https://mvwhs9b5ieeclup6.instances.ctfcup.online"
 ADDR = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 PK = "0xea72cf390e9d4410fde4d7ecbecf3cd60fde602bda76aff599c7275855d61468"
+CHAIN_ID = 31337
 
 
 def sel(sig):
     return keccak(text=sig)[:4]
 
 
-S_SKIP = sel("skip()")
-S_COMMIT = sel("commit()")
-S_MOVE = sel("playerMove(uint8[],uint8[])")
-S_STREAK = sel("streak()")
-S_COMMITTED = sel("committed()")
-S_POSTED = sel("dicePosted()")
-S_PTM = sel("playerToMove()")
-S_BOARD = sel("boardPacked()")
-S_D1 = sel("d1()")
-S_D2 = sel("d2()")
-S_TOKENS = sel("tokens()")
-S_GID = sel("gameId()")
-S_TURN = sel("turn()")
-S_SOLVED = sel("isSolved()")
+S = {k: sel(v) for k, v in {
+    "skip": "skip()", "commit": "commit()", "move": "playerMove(uint8[],uint8[])",
+    "streak": "streak()", "committed": "committed()", "posted": "dicePosted()",
+    "ptm": "playerToMove()", "board": "boardPacked()", "d1": "d1()", "d2": "d2()",
+    "tokens": "tokens()", "gameId": "gameId()", "turn": "turn()", "solved": "isSolved()",
+}.items()}
 
 
-def unpack_board(key: int) -> E.Board:
-    pts = []
-    for i in range(24):
-        v = (key >> (6 * i)) & 0x3F
-        pts.append(v - 64 if v >= 32 else v)
-    base = 144
-    bar = ((key >> base) & 0x1F, (key >> (base + 5)) & 0x1F)
-    off = ((key >> (base + 10)) & 0x1F, (key >> (base + 15)) & 0x1F)
-    return E.Board(tuple(pts), bar, off)
+def unpack_board(key):
+    pts = [((key >> (6 * i)) & 0x3F) for i in range(24)]
+    pts = [v - 64 if v >= 32 else v for v in pts]
+    b = 144
+    return E.Board(tuple(pts), ((key >> b) & 0x1F, (key >> (b + 5)) & 0x1F),
+                   ((key >> (b + 10)) & 0x1F, (key >> (b + 15)) & 0x1F))
 
 
-def encode_move(froms, dies) -> bytes:
-    from eth_abi import encode as abi_encode
-    return S_MOVE + abi_encode(["uint8[]", "uint8[]"], [list(froms), list(dies)])
+def enc_move(froms, dies):
+    return S["move"] + abi_encode(["uint8[]", "uint8[]"], [list(froms), list(dies)])
 
 
 class Chain:
     def __init__(self, rpc=RPC):
-        self.w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 25}))
+        self.url = rpc
+        self.s = requests.Session()
         self.acct = Account.from_key(PK)
         self.addr = self.acct.address
+        self.nonce = None
+        self._id = 0
+        self.lat = []
 
-    def read(self, selector) -> int:
-        r = self.w3.eth.call({"to": ADDR, "data": selector})
-        return int.from_bytes(r, "big")
+    # ---- raw json-rpc ----
+    def batch(self, calls):
+        payload = []
+        for i, (m, p) in enumerate(calls):
+            payload.append({"jsonrpc": "2.0", "id": i, "method": m, "params": p})
+        t0 = time.time()
+        r = self.s.post(self.url, json=payload, timeout=30).json()
+        self.lat.append(time.time() - t0)
+        if isinstance(r, dict):
+            r = [r]
+        out = [None] * len(calls)
+        for item in r:
+            out[item["id"]] = item
+        return out
 
+    def one(self, m, p):
+        return self.batch([(m, p)])[0]
+
+    def call_single(self, selector):
+        r = self.one("eth_call", [{"to": ADDR, "data": "0x" + selector.hex()}, "latest"])
+        return int(r["result"], 16)
+
+    # ---- state ----
     def state(self):
-        st = {}
-        st["gameId"] = self.read(S_GID)
-        st["turn"] = self.read(S_TURN)
-        st["ptm"] = self.read(S_PTM) == 1
-        st["committed"] = self.read(S_COMMITTED) == 1
-        st["posted"] = self.read(S_POSTED) == 1
-        st["d1"] = self.read(S_D1)
-        st["d2"] = self.read(S_D2)
-        st["board"] = unpack_board(self.read(S_BOARD))
-        st["streak"] = self.read(S_STREAK)
-        st["tokens"] = self.read(S_TOKENS)
+        keys = ["gameId", "turn", "ptm", "committed", "posted", "d1", "d2", "board", "streak", "tokens"]
+        calls = [("eth_call", [{"to": ADDR, "data": "0x" + S[k].hex()}, "latest"]) for k in keys]
+        res = self.batch(calls)
+        v = {}
+        for k, r in zip(keys, res):
+            v[k] = int(r["result"], 16)
+        st = {
+            "gameId": v["gameId"], "turn": v["turn"], "ptm": v["ptm"] == 1,
+            "committed": v["committed"] == 1, "posted": v["posted"] == 1,
+            "d1": v["d1"], "d2": v["d2"], "board": unpack_board(v["board"]),
+            "streak": v["streak"], "tokens": v["tokens"],
+        }
         return st
 
-    def send(self, data: bytes, gas=900000):
+    def balance(self):
+        r = self.one("eth_getBalance", [self.addr, "latest"])
+        return int(r["result"], 16)
+
+    def sync_nonce(self):
+        r = self.one("eth_getTransactionCount", [self.addr, "pending"])
+        self.nonce = int(r["result"], 16)
+        return self.nonce
+
+    # ---- tx ----
+    def send(self, data, gas=900000):
+        if self.nonce is None:
+            self.sync_nonce()
         tx = {
-            "to": ADDR, "data": data, "gas": gas, "chainId": self.w3.eth.chain_id,
-            "nonce": self.w3.eth.get_transaction_count(self.addr, "pending"),
-            "gasPrice": self.w3.eth.gas_price, "value": 0,
+            "to": ADDR, "data": data, "gas": gas, "chainId": CHAIN_ID,
+            "nonce": self.nonce, "gasPrice": 10**9, "value": 0,
         }
         signed = self.acct.sign_transaction(tx)
         raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
-        h = self.w3.eth.send_raw_transaction(raw)
-        return self.w3.eth.wait_for_transaction_receipt(h, timeout=60)
+        r = self.one("eth_sendRawTransaction", ["0x" + raw.hex()])
+        if "error" in r:
+            # nonce/sync problem: resync and retry once
+            self.sync_nonce()
+            tx["nonce"] = self.nonce
+            signed = self.acct.sign_transaction(tx)
+            raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+            r = self.one("eth_sendRawTransaction", ["0x" + raw.hex()])
+            if "error" in r:
+                raise RuntimeError("send failed: %s" % r["error"])
+        self.nonce += 1
+        return r["result"]
+
+    def wait_receipts(self, hashes, timeout=60):
+        """Poll several receipt hashes in one batch; returns dict hash->status."""
+        pending = list(hashes)
+        out = {}
+        t0 = time.time()
+        while pending and time.time() - t0 < timeout:
+            res = self.batch([("eth_getTransactionReceipt", [h]) for h in pending])
+            still = []
+            for h, r in zip(pending, res):
+                if r.get("result"):
+                    out[h] = int(r["result"]["status"], 16)
+                else:
+                    still.append(h)
+            pending = still
+            if pending:
+                time.sleep(0.05)
+        return out
 
     def skip(self):
-        return self.send(S_SKIP, gas=400000)
+        return self.send(S["skip"], gas=300000)
 
     def commit(self):
-        return self.send(S_COMMIT, gas=400000)
+        return self.send(S["commit"], gas=300000)
 
     def move(self, froms, dies):
-        return self.send(encode_move(list(froms), list(dies)), gas=1500000)
+        return self.send(enc_move(froms, dies), gas=1200000)
