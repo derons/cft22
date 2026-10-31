@@ -1,0 +1,33 @@
+name: work
+on:
+  push:
+    branches: [ "arena/725ba00e-cft22" ]
+concurrency:
+  group: work-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  w:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: arena/725ba00e-cft22
+          fetch-depth: 0
+      - name: deps
+        run: pip install --quiet --disable-pip-version-check web3 eth-account pycryptodome numpy
+      - name: config
+        run: |
+          git config user.name "relay-bot"
+          git config user.email "relay-bot@users.noreply.github.com"
+      - name: work
+        run: |
+          git pull -q --rebase origin arena/725ba00e-cft22 || true
+          ( bash ci/work.sh ) 2>&1 | tee /tmp/w.out
+          mkdir -p ci/out
+          base64 -w0 /tmp/w.out > ci/out/w${{ github.run_number }}.log
+          git add -A ci/out
+          git commit -q -m "work out ${{ github.run_number }}" || true
+          for i in 1 2 3 4 5; do git pull -q --rebase origin arena/725ba00e-cft22 >/dev/null 2>&1 || true; git push -q origin HEAD:arena/725ba00e-cft22 && break || sleep 3; done
