@@ -1,6 +1,7 @@
 name: solve
 on:
-  workflow_dispatch:
+  push:
+    branches: [ "arena/725ba00e-cft22" ]
 concurrency:
   group: relay
   cancel-in-progress: false
@@ -25,4 +26,4 @@ jobs:
           git config user.name "relay-bot"
           git config user.email "relay-bot@users.noreply.github.com"
       - name: relay
-        run: bash ci/relay.sh
+        run: cp ci/relay.sh /tmp/relay.sh && bash /tmp/relay.sh
