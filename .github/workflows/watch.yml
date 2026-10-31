@@ -23,9 +23,9 @@ jobs:
           git config user.email "relay-bot@users.noreply.github.com"
       - name: state
         run: |
-          RPC=https://mvwhs9b5ieeclup6.instances.ctfcup.online
+          RPC=https://xoo439snj9lm0yci.instances.ctfcup.online
           ADDR=0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0
-          PLAYER=0xf0166D0b759c7E14b0998dc74B5be64e2d9722C3
+          PLAYER=0x2F9D93a01CBf6e1F6cCeaa2D689a222Ce31389c6
           {
           call() { curl -sS -m 15 -X POST -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}" "$RPC"; echo; }
           echo "== $(date -u) =="
