@@ -6,12 +6,15 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import requests
+
 import chain
 import engine as E
 import policy
 import vrf
 
 WINS = 15
+FAST = os.environ.get("FAST", "1") == "1"
 MAX_SCAN = int(os.environ.get("MAX_SCAN", "6"))
 DEADLINE = time.time() + float(os.environ.get("BUDGET", "1500"))
 MOVE_GAS = int(os.environ.get("MOVE_GAS", "0")) or None
@@ -39,19 +42,24 @@ def play_live(ch, pl, gid, out):
             path = [] if end is None else E.path_to(board, d, end)
             froms, dies = [p[0] for p in path], [p[1] for p in path]
             out.append("T%-3d US  %s %s -> %s" % (t, d, fmt(board), list(zip(froms, dies))))
-            ok, msg = ch.move(froms, dies)
+            same = 1 if st.get("_last_turn") == t else 0
+            if FAST and same == 0:
+                ok, msg = ch.move_fast(froms, dies)
+            else:
+                ok, msg = ch.move(froms, dies)  # estimateGas path (slow but sure)
             if not ok:
                 fails += 1
                 out.append("  !! move failed (%s) tries=%d" % (msg, fails))
                 if fails > 6:
                     return
-                time.sleep(0.5)
+                time.sleep(0.4)
             else:
                 fails = 0
                 if end is not None and end.current_won():
                     out.append("  -> all 15 off")
-            time.sleep(0.8)
+            time.sleep(0.35 if FAST else 0.8)
             st = ch.state()
+            st["_last_turn"] = t
         else:
             t0 = time.time()
             while True:
@@ -81,6 +89,20 @@ def ensure_config():
     return json.load(open(cfgp))
 
 
+def grab_flag(ch):
+    for a in range(6):
+        try:
+            r = requests.get(ch.url + "/flag", timeout=30)
+            print("FLAG_RESPONSE:", repr(r.text[:400]), flush=True)
+            if "ctfcup{" in r.text:
+                print("FLAG:", r.text.strip(), flush=True)
+                return True
+        except Exception as e:
+            print("flag fetch error: %r" % (e,), flush=True)
+        time.sleep(1.5)
+    return False
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "watch"
     ensure_config()
@@ -94,6 +116,10 @@ def main():
     st = ch.state()
     print("STATE %s" % {k: (fmt(v) if k == "board" else v) for k, v in st.items()}, flush=True)
     print("latency: state_batch=%.2fs" % ch.lat[-1], flush=True)
+    if st["streak"] >= WINS:
+        print("already solved", flush=True)
+        grab_flag(ch)
+        return
     if mode == "watch":
         return
     while time.time() < DEADLINE:
@@ -105,6 +131,7 @@ def main():
             continue
         if st["streak"] >= WINS:
             print("SOLVED streak=%d" % st["streak"], flush=True)
+            grab_flag(ch)
             return
         if st["tokens"] == 0:
             print("NO TOKENS", flush=True)
@@ -146,6 +173,8 @@ def main():
         try:
             st = ch.state()
             print("RESULT gid=%d streak=%d tokens=%d" % (gid, st["streak"], st["tokens"]), flush=True)
+            if st["streak"] >= WINS:
+                grab_flag(ch)
         except Exception as e:
             print("state read failed after game: %r" % (e,), flush=True)
             time.sleep(2)

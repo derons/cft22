@@ -18,7 +18,7 @@ jobs:
           ref: arena/725ba00e-cft22
           fetch-depth: 0
       - name: deps
-        run: pip install --quiet --disable-pip-version-check web3 eth-account pycryptodome numpy
+        run: pip install --quiet --disable-pip-version-check eth-account pycryptodome numpy
       - name: config
         run: |
           git config user.name "relay-bot"

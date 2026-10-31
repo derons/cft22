@@ -17,6 +17,7 @@ CFG = json.load(open(CFG_PATH)) if os.path.exists(CFG_PATH) else {}
 RPC = CFG.get("rpc", "")
 ADDR = CFG.get("addr", "")
 PK = CFG.get("pk", "")
+MOVE_GAS = int(os.environ.get("MOVE_GAS", "9000000"))
 CHAIN_ID = 31337
 
 
@@ -176,6 +177,13 @@ class Chain:
 
     def commit(self):
         return self.exec_tx(S["commit"], gas_min=300000, label="commit")
+
+    def move_fast(self, froms, dies, gas=None):
+        """Fire-and-confirm-later move: one round trip, gas fixed to avoid estimateGas."""
+        gas = gas or MOVE_GAS
+        data = enc_move(froms, dies)
+        h, err = self._raw(data, gas)
+        return (h is not None), (err or "sent")
 
     def move(self, froms, dies):
         return self.exec_tx(enc_move(froms, dies), gas_min=3000000, label="move")
