@@ -3,7 +3,7 @@ on:
   push:
     branches: [ "arena/725ba00e-cft22" ]
 concurrency:
-  group: work-${{ github.run_id }}
+  group: work
   cancel-in-progress: false
 jobs:
   w:

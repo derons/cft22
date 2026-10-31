@@ -1,0 +1,41 @@
+name: watch
+on:
+  push:
+    branches: [ "arena/725ba00e-cft22" ]
+concurrency:
+  group: watch-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  w:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: arena/725ba00e-cft22
+          fetch-depth: 0
+      - name: config
+        run: |
+          git config user.name "relay-bot"
+          git config user.email "relay-bot@users.noreply.github.com"
+      - name: state
+        run: |
+          RPC=https://mvwhs9b5ieeclup6.instances.ctfcup.online
+          ADDR=0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0
+          PLAYER=0xf0166D0b759c7E14b0998dc74B5be64e2d9722C3
+          {
+          call() { curl -sS -m 15 -X POST -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}" "$RPC"; echo; }
+          echo "== $(date -u) =="
+          echo -n "block   "; call eth_blockNumber '[]'
+          echo -n "balance "; call eth_getBalance "[\"$PLAYER\",\"latest\"]"
+          echo -n "nonce   "; call eth_getTransactionCount "[\"$PLAYER\",\"latest\"]"
+          for pair in "gameId:d7c81b55" "turn:8b299903" "playerToMove:2ee25c51" "committed:9b6b9664" "dicePosted:3b8c9faa" "d1:8c18f2f1" "d2:7ef1dbea" "boardPacked:dc853352" "streak:b3ab4f70" "tokens:9d63848a" "isSolved:64d98f6e"; do
+            n="${pair%%:*}"; s="${pair##*:}"
+            printf "%-13s " "$n"; call eth_call "[{\"to\":\"$ADDR\",\"data\":\"0x$s\"},\"latest\"]"
+          done
+          } 2>&1 | tee /tmp/w.out
+          mkdir -p ci/out; base64 -w0 /tmp/w.out > ci/out/s${{ github.run_number }}.log
+          git add -A ci/out; git commit -q -m "watch ${{ github.run_number }}" || true
+          for i in 1 2 3 4 5; do git pull -q --rebase origin arena/725ba00e-cft22 >/dev/null 2>&1 || true; git push -q origin HEAD:arena/725ba00e-cft22 && break || sleep 3; done
