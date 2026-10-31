@@ -29,6 +29,13 @@ jobs:
           {
           call() { curl -sS -m 15 -X POST -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}" "$RPC"; echo; }
           echo "== $(date -u) =="
+          echo "--- headers GET / ---"
+          curl -sS -i -m 15 "$RPC/" | head -25
+          echo "--- headers POST / ---"
+          curl -sS -i -m 15 -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$RPC" | head -25
+          echo "--- dns ---"
+          getent hosts mvwhs9b5ieeclup6.instances.ctfcup.online || true
+          curl -sS -m 15 -o /dev/null -w 'http:%{http_code} ip:%{remote_ip}\n' "$RPC/" || true
           for i in 1 2 3 4 5 6; do
             echo "--- sample $i ---"
             echo -n "block   "; call eth_getBlockByNumber '["latest",false]'
