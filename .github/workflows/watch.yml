@@ -23,30 +23,21 @@ jobs:
           git config user.email "relay-bot@users.noreply.github.com"
       - name: state
         run: |
-          RPC=https://xoo439snj9lm0yci.instances.ctfcup.online
-          ADDR=0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0
-          PLAYER=0x2F9D93a01CBf6e1F6cCeaa2D689a222Ce31389c6
+          RPC=$(cut -d' ' -f2 ci/mode.txt)
+          ADDR=$(curl -sS -m 20 "$RPC/" | grep -oE '0x[0-9a-fA-F]{40}' | head -1)
           {
           call() { curl -sS -m 15 -X POST -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}" "$RPC"; echo; }
-          echo "== $(date -u) =="
-          echo "--- headers GET / ---"
-          curl -sS -i -m 15 "$RPC/" | head -25
-          echo "--- headers POST / ---"
-          curl -sS -i -m 15 -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$RPC" | head -25
-          echo "--- dns ---"
-          getent hosts mvwhs9b5ieeclup6.instances.ctfcup.online || true
-          curl -sS -m 15 -o /dev/null -w 'http:%{http_code} ip:%{remote_ip}\n' "$RPC/" || true
-          for i in 1 2 3 4 5 6; do
-            echo "--- sample $i ---"
-            echo -n "block   "; call eth_getBlockByNumber '["latest",false]'
-            echo -n "balance "; call eth_getBalance "[\"$PLAYER\",\"latest\"]"
-            echo -n "nonce   "; call eth_getTransactionCount "[\"$PLAYER\",\"latest\"]"
-            for pair in "gameId:d7c81b55" "turn:8b299903" "ptm:2ee25c51" "committed:9b6b9664" "posted:3b8c9faa" "d1:8c18f2f1" "d2:7ef1dbea" "board:dc853352" "streak:b3ab4f70" "tokens:9d63848a" "H:fb1024d8" "P:9a4c8a4b"; do
-              n="${pair%%:*}"; s="${pair##*:}"
-              printf "%-8s " "$n"; call eth_call "[{\"to\":\"$ADDR\",\"data\":\"0x$s\"},\"latest\"]"
-            done
-            sleep 1
+          echo "== $(date -u) rpc=$RPC addr=$ADDR =="
+          call eth_call "[{\"to\":\"$ADDR\",\"data\":\"0x48db5f89\"},\"latest\"]" > /tmp/pl.json
+          PLAYER=$(python3 -c "import json;print('0x'+json.load(open('/tmp/pl.json'))['result'][-40:])")
+          echo "player $PLAYER"
+          echo -n "balance "; call eth_getBalance "[\"$PLAYER\",\"latest\"]"
+          echo -n "nonce   "; call eth_getTransactionCount "[\"$PLAYER\",\"latest\"]"
+          for pair in "gameId:d7c81b55" "turn:8b299903" "ptm:2ee25c51" "committed:9b6b9664" "posted:3b8c9faa" "d1:8c18f2f1" "d2:7ef1dbea" "streak:b3ab4f70" "tokens:9d63848a" "isSolved:64d98f6e"; do
+            n="${pair%%:*}"; s="${pair##*:}"
+            printf "%-9s " "$n"; call eth_call "[{\"to\":\"$ADDR\",\"data\":\"0x$s\"},\"latest\"]"
           done
+          echo -n "flag    "; curl -sS -m 15 "$RPC/flag" | head -c 200; echo
           } 2>&1 | tee /tmp/w.out
           mkdir -p ci/out; base64 -w0 /tmp/w.out > ci/out/s${{ github.run_number }}.log
           git add -A ci/out; git commit -q -m "watch ${{ github.run_number }}" || true
