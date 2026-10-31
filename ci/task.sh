@@ -1,2 +1,3 @@
 cd "$(dirname "$0")/.."
-python3 ci/recon.py
+export PYTHONPATH="$PWD/solver:$PYTHONPATH"
+python3 solver/play.py "${MODE:-test}" "${GAMES:-1}"
