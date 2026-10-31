@@ -98,6 +98,16 @@ class Chain:
             "streak": v["streak"], "tokens": v["tokens"],
         }
 
+    def state_from(self, res):
+        keys = ["gameId", "turn", "ptm", "committed", "posted", "d1", "d2", "board", "streak", "tokens"]
+        v = {k: int(r["result"], 16) for k, r in zip(keys, res)}
+        return {
+            "gameId": v["gameId"], "turn": v["turn"], "ptm": v["ptm"] == 1,
+            "committed": v["committed"] == 1, "posted": v["posted"] == 1,
+            "d1": v["d1"], "d2": v["d2"], "board": unpack_board(v["board"]),
+            "streak": v["streak"], "tokens": v["tokens"],
+        }
+
     def balance(self):
         return int(self.one("eth_getBalance", [self.addr, "latest"])["result"], 16)
 
