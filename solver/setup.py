@@ -7,7 +7,6 @@ import sys
 import time
 
 import requests
-import sympy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = os.path.join(HERE, "..", "ci", "config.json")
@@ -29,24 +28,46 @@ def bsgs(g, h, p, order):
     return None
 
 
+def primes_upto(limit):
+    sieve = bytearray([1]) * (limit + 1)
+    sieve[0:2] = b"\x00\x00"
+    for i in range(2, int(limit ** 0.5) + 1):
+        if sieve[i]:
+            sieve[i * i::i] = bytearray(len(sieve[i * i::i]))
+    return [i for i in range(2, limit + 1) if sieve[i]]
+
+
+def factorize(n, limit=3 * 10 ** 6):
+    fac = {}
+    for p in primes_upto(limit):
+        while n % p == 0:
+            fac[p] = fac.get(p, 0) + 1
+            n //= p
+        if n == 1:
+            break
+    if n != 1:
+        raise RuntimeError("unfactored remainder %d" % n)
+    return fac
+
+
 def dlog(g, h, p):
     n = p - 1
-    fac = sympy.factorint(n, limit=3 * 10 ** 6)
-    assert all(v == 1 for v in fac.values()), "repeated factors: %s" % fac
-    M = 1
-    for q in fac:
-        M *= q
-    assert M == n, "unfactored remainder"
+    fac = factorize(n)
     x, mod = 0, 1
-    for q in fac:
-        gq = pow(g, n // q, p)
-        hq = pow(h, n // q, p)
-        xi = bsgs(gq, hq, p, q)
-        if xi is None:
-            raise RuntimeError("dlog failed for factor %d" % q)
-        t = ((xi - x) % q) * pow(mod % q, -1, q) % q
+    for q, e in fac.items():
+        qe = q ** e
+        xi, qk = 0, 1
+        gamma = pow(g, n // q, p)
+        for k in range(e):
+            hk = pow(h * pow(g, -xi, p) % p, n // (q ** (k + 1)), p)
+            d = bsgs(gamma, hk, p, q)
+            if d is None:
+                raise RuntimeError("dlog failed q=%d k=%d" % (q, k))
+            xi += d * qk
+            qk *= q
+        t = ((xi - x) % qe) * pow(mod % qe, -1, qe) % qe
         x = x + mod * t
-        mod *= q
+        mod *= qe
     return x % n
 
 
