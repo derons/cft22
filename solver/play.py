@@ -80,7 +80,12 @@ def main():
     if mode == "watch":
         return
     while time.time() < DEADLINE:
-        st = ch.state()
+        try:
+            st = ch.state()
+        except Exception as e:
+            print("state read failed: %r" % (e,), flush=True)
+            time.sleep(2)
+            continue
         if st["streak"] >= WINS:
             print("SOLVED streak=%d" % st["streak"], flush=True)
             return
@@ -116,10 +121,17 @@ def main():
             time.sleep(0.2)
             gid = pick
         out = []
-        play_live(ch, pl, gid, out)
+        try:
+            play_live(ch, pl, gid, out)
+        except Exception as e:
+            out.append("play_live exception: %r" % (e,))
         print("\n".join(out), flush=True)
-        st = ch.state()
-        print("RESULT gid=%d streak=%d tokens=%d" % (gid, st["streak"], st["tokens"]), flush=True)
+        try:
+            st = ch.state()
+            print("RESULT gid=%d streak=%d tokens=%d" % (gid, st["streak"], st["tokens"]), flush=True)
+        except Exception as e:
+            print("state read failed after game: %r" % (e,), flush=True)
+            time.sleep(2)
 
 
 if __name__ == "__main__":

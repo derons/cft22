@@ -2,6 +2,8 @@
 import time
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from eth_account import Account
 from eth_abi import encode as abi_encode
 from eth_utils import keccak
@@ -41,24 +43,40 @@ def enc_move(froms, dies):
 class Chain:
     def __init__(self, rpc=RPC):
         self.url = rpc
-        self.s = requests.Session()
+        self.s = self._session()
         self.acct = Account.from_key(PK)
         self.addr = self.acct.address
         self.nonce = None
         self.lat = []
 
-    def batch(self, calls):
+    def _session(self):
+        s = requests.Session()
+        ad = HTTPAdapter(max_retries=Retry(total=2, backoff_factor=0.3,
+                                           allowed_methods=None, status_forcelist=[502, 503, 504]))
+        s.mount("https://", ad)
+        s.headers.update({"Connection": "close"})
+        return s
+
+    def batch(self, calls, tries=8):
         payload = [{"jsonrpc": "2.0", "id": i, "method": m, "params": p}
                    for i, (m, p) in enumerate(calls)]
-        t0 = time.time()
-        r = self.s.post(self.url, json=payload, timeout=30).json()
-        self.lat.append(time.time() - t0)
-        if isinstance(r, dict):
-            r = [r]
-        out = [None] * len(calls)
-        for item in r:
-            out[item["id"]] = item
-        return out
+        last = None
+        for a in range(tries):
+            t0 = time.time()
+            try:
+                r = self.s.post(self.url, json=payload, timeout=30).json()
+                self.lat.append(time.time() - t0)
+                if isinstance(r, dict):
+                    r = [r]
+                out = [None] * len(calls)
+                for item in r:
+                    out[item["id"]] = item
+                return out
+            except Exception as e:  # ssl eof, timeouts, bad json
+                last = e
+                time.sleep(min(0.4 + 0.6 * a, 6.0))
+                self.s = self._session()
+        raise RuntimeError("rpc unavailable: %r" % (last,))
 
     def one(self, m, p):
         return self.batch([(m, p)])[0]
