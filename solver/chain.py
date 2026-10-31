@@ -1,5 +1,4 @@
 """Fast batched JSON-RPC client for the Flygammon contract (remote anvil over HTTPS)."""
-import json
 import time
 
 import requests
@@ -46,14 +45,11 @@ class Chain:
         self.acct = Account.from_key(PK)
         self.addr = self.acct.address
         self.nonce = None
-        self._id = 0
         self.lat = []
 
-    # ---- raw json-rpc ----
     def batch(self, calls):
-        payload = []
-        for i, (m, p) in enumerate(calls):
-            payload.append({"jsonrpc": "2.0", "id": i, "method": m, "params": p})
+        payload = [{"jsonrpc": "2.0", "id": i, "method": m, "params": p}
+                   for i, (m, p) in enumerate(calls)]
         t0 = time.time()
         r = self.s.post(self.url, json=payload, timeout=30).json()
         self.lat.append(time.time() - t0)
@@ -67,62 +63,57 @@ class Chain:
     def one(self, m, p):
         return self.batch([(m, p)])[0]
 
-    def call_single(self, selector):
-        r = self.one("eth_call", [{"to": ADDR, "data": "0x" + selector.hex()}, "latest"])
-        return int(r["result"], 16)
-
-    # ---- state ----
+    # ---------------- state ----------------
     def state(self):
         keys = ["gameId", "turn", "ptm", "committed", "posted", "d1", "d2", "board", "streak", "tokens"]
-        calls = [("eth_call", [{"to": ADDR, "data": "0x" + S[k].hex()}, "latest"]) for k in keys]
-        res = self.batch(calls)
-        v = {}
-        for k, r in zip(keys, res):
-            v[k] = int(r["result"], 16)
-        st = {
+        res = self.batch([("eth_call", [{"to": ADDR, "data": "0x" + S[k].hex()}, "latest"]) for k in keys])
+        v = {k: int(r["result"], 16) for k, r in zip(keys, res)}
+        return {
             "gameId": v["gameId"], "turn": v["turn"], "ptm": v["ptm"] == 1,
             "committed": v["committed"] == 1, "posted": v["posted"] == 1,
             "d1": v["d1"], "d2": v["d2"], "board": unpack_board(v["board"]),
             "streak": v["streak"], "tokens": v["tokens"],
         }
-        return st
 
     def balance(self):
-        r = self.one("eth_getBalance", [self.addr, "latest"])
-        return int(r["result"], 16)
+        return int(self.one("eth_getBalance", [self.addr, "latest"])["result"], 16)
 
     def sync_nonce(self):
-        r = self.one("eth_getTransactionCount", [self.addr, "pending"])
-        self.nonce = int(r["result"], 16)
+        self.nonce = int(self.one("eth_getTransactionCount", [self.addr, "pending"])["result"], 16)
         return self.nonce
 
-    # ---- tx ----
-    def send(self, data, gas=900000):
+    def block_gas_limit(self):
+        r = self.one("eth_getBlockByNumber", ["latest", False])
+        return int(r["result"]["gasLimit"], 16)
+
+    # ---------------- tx ----------------
+    def _raw(self, data, gas):
         if self.nonce is None:
             self.sync_nonce()
-        tx = {
-            "to": ADDR, "data": data, "gas": gas, "chainId": CHAIN_ID,
-            "nonce": self.nonce, "gasPrice": 10**9, "value": 0,
-        }
+        tx = {"to": ADDR, "data": data, "gas": gas, "chainId": CHAIN_ID,
+              "nonce": self.nonce, "gasPrice": 10 ** 9, "value": 0}
         signed = self.acct.sign_transaction(tx)
         raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
         r = self.one("eth_sendRawTransaction", ["0x" + raw.hex()])
         if "error" in r:
-            # nonce/sync problem: resync and retry once
             self.sync_nonce()
             tx["nonce"] = self.nonce
             signed = self.acct.sign_transaction(tx)
             raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
             r = self.one("eth_sendRawTransaction", ["0x" + raw.hex()])
             if "error" in r:
-                raise RuntimeError("send failed: %s" % r["error"])
+                return None, r["error"]
         self.nonce += 1
-        return r["result"]
+        return r["result"], None
 
-    def wait_receipts(self, hashes, timeout=60):
-        """Poll several receipt hashes in one batch; returns dict hash->status."""
-        pending = list(hashes)
-        out = {}
+    def estimate(self, data, sender=None):
+        r = self.one("eth_estimateGas", [{"from": sender or self.addr, "to": ADDR, "data": "0x" + data.hex()}])
+        if "error" in r:
+            return None, r["error"]
+        return int(r["result"], 16), None
+
+    def wait_receipts(self, hashes, timeout=90):
+        pending, out = list(hashes), {}
         t0 = time.time()
         while pending and time.time() - t0 < timeout:
             res = self.batch([("eth_getTransactionReceipt", [h]) for h in pending])
@@ -137,11 +128,32 @@ class Chain:
                 time.sleep(0.05)
         return out
 
+    def exec_tx(self, data, gas_min=300000, tries=3, label=""):
+        """Estimate gas, send, and confirm. Returns (ok, msg)."""
+        est, err = self.estimate(data)
+        gas = max(gas_min, int((est or 300000) * 1.6) + 100000) if est else gas_min
+        for a in range(tries):
+            h, serr = self._raw(data, gas)
+            if h is None:
+                time.sleep(0.3)
+                continue
+            rc = self.wait_receipts([h], timeout=90).get(h)
+            if rc == 1:
+                return True, "ok gas=%d" % gas
+            if rc == 0:
+                est2, e2 = self.estimate(data)
+                if est2:
+                    gas = max(gas, int(est2 * 2.0) + 200000)
+                time.sleep(0.2)
+                continue
+            return False, "receipt timeout"
+        return False, "failed %s" % (label,)
+
     def skip(self):
-        return self.send(S["skip"], gas=300000)
+        return self.exec_tx(S["skip"], gas_min=300000, label="skip")
 
     def commit(self):
-        return self.send(S["commit"], gas=300000)
+        return self.exec_tx(S["commit"], gas_min=300000, label="commit")
 
     def move(self, froms, dies):
-        return self.send(enc_move(froms, dies), gas=1200000)
+        return self.exec_tx(enc_move(froms, dies), gas_min=3000000, label="move")
