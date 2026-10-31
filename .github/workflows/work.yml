@@ -2,6 +2,7 @@ name: work
 on:
   push:
     branches: [ "arena/725ba00e-cft22" ]
+    paths: [ "ci/mode.txt" ]
 concurrency:
   group: work
   cancel-in-progress: false

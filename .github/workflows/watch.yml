@@ -2,6 +2,7 @@ name: watch
 on:
   push:
     branches: [ "arena/725ba00e-cft22" ]
+    paths: [ "ci/watch" ]
 concurrency:
   group: watch-${{ github.run_id }}
   cancel-in-progress: false
